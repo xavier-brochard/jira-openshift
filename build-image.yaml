@@ -19,7 +19,7 @@ objects:
     source:
       type: Git
       git:
-        uri: REPLACEME
+        uri: git@github.com:xabrochard/jira-openshift.git
         ref: master
       sourceSecret:
         name: sshsecret

@@ -10,12 +10,12 @@ metadata:
       Jira is the project management tool for Agile teams. This template embeds a PostgreSQL 10 database.
       
       For more information about using this template, including OpenShift considerations, see
-      REPLACEME.
+      https://github.com/xabrochard/jira-openshift.
     openshift.io/long-description: >-
       This template defines all resources needed to deploy a fully functional
       Jira 8.11.0 in Data Center mode for you project management.  
     openshift.io/provider-display-name: "Xavier-Alexandre Brochard"
-    openshift.io/documentation-url: "REPLACEME" 
+    openshift.io/documentation-url: "https://github.com/xabrochard/jira-openshift" 
     iconClass: "icon-openshift"
     tags: "jira,project,management"
 objects:
