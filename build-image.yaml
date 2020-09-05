@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: Jira
+  annotations:
+    openshift.io/display-name: "Build the Jira image in development environment"
+    iconClass: "icon-openshift"
+    tags: "jira"
+objects:
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    name: jira
+    labels:
+      build: jira
+  spec:
+    triggers:
+    - type: ConfigChange
+    source:
+      type: Git
+      git:
+        uri: REPLACEME
+        ref: master
+      sourceSecret:
+        name: sshsecret
+    strategy:
+      type: Docker
+      dockerStrategy:
+        env:
+          - name: JIRA_VERSION
+            value: '8.11.0'
+        from:
+          kind: ImageStreamTag
+          name: 'ubi8:8.2'
+    output:
+      to:
+        kind: ImageStreamTag
+        name: jira:latest
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    name: jira
+  spec:
+    dockerImageRepository: ''
+    tags:
+    - name: latest

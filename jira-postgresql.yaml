@@ -1,0 +1,381 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: Jira
+metadata:
+  name: jira
+  annotations:
+    openshift.io/display-name: "Jira 8.11.0"
+    description: >-
+      Jira is the project management tool for Agile teams. This template embeds a PostgreSQL 10 database.
+      
+      For more information about using this template, including OpenShift considerations, see
+      REPLACEME.
+    openshift.io/long-description: >-
+      This template defines all resources needed to deploy a fully functional
+      Jira 8.11.0 in Data Center mode for you project management.  
+    openshift.io/provider-display-name: "Xavier-Alexandre Brochard"
+    openshift.io/documentation-url: "REPLACEME" 
+    iconClass: "icon-openshift"
+    tags: "jira,project,management"
+objects:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: jira-environment
+  data:
+    JIRA_INSTALL_DIR: "/opt/atlassian/jira"
+    JIRA_HOME: "/var/atlassian/application-data/jira"
+    CLUSTERED: "true"
+    JIRA_SHARED_HOME: "/data/jira/sharedhome"
+    POSTGRESQL_DATABASE: "${DATABASE_NAME}"
+    POSTGRESQL_USER: "${DATABASE_USER}"
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: jira-clusterproperties
+  data:
+    cluster.properties: |-
+      jira.node.id = NODE_NAME
+      jira.shared.home = JIRA_SHARED_HOME
+      ehcache.peer.discovery = default
+      ehcache.listener.hostName = NODE_IP
+      ehcache.listener.port = 40001
+      ehcache.listener.socketTimeoutMillis = 2000
+      ehcache.object.port = 40011
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: jira-dbconfigxml
+  data:
+    dbconfig.xml: |-
+      <?xml version="1.0" encoding="UTF-8"?>
+        <jira-database-config>
+          <name>defaultDS</name>
+          <delegator-name>default</delegator-name>
+          <database-type>postgres72</database-type>
+          <schema-name>${DATABASE_SCHEMA}</schema-name>
+          <jdbc-datasource>
+            <url>jdbc:postgresql://jira-database:5432/${DATABASE_NAME}</url>
+            <username>${DATABASE_USER}</username>
+            <password>${DATABASE_PASSWORD}</password>
+            <driver-class>org.postgresql.Driver</driver-class>
+            <pool-min-size>20</pool-min-size>
+            <pool-max-size>100</pool-max-size>
+            <pool-min-idle>10</pool-min-idle>
+            <pool-max-idle>20</pool-max-idle>
+            <pool-max-wait>30000</pool-max-wait>
+            <validation-query>select 1</validation-query>
+            <time-between-eviction-runs-millis>30000</time-between-eviction-runs-millis>
+            <min-evictable-idle-time-millis>5000</min-evictable-idle-time-millis>
+            <pool-remove-abandoned>true</pool-remove-abandoned>
+            <pool-remove-abandoned-timeout>300</pool-remove-abandoned-timeout>
+            <pool-test-while-idle>true</pool-test-while-idle>
+            <pool-test-on-borrow>false</pool-test-on-borrow>
+          </jdbc-datasource>
+        </jira-database-config>
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: jira-sharedhome
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 4Gi
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: jira-database
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 4Gi
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: jira-run
+  spec:
+    selector:
+      type: jira-run
+    type: ClusterIP
+    ports:
+      - name: 8080-tcp
+        port: 8080
+        protocol: TCP
+        targetPort: 8080
+      - name: 8443-tcp
+        port: 8443
+        protocol: TCP
+        targetPort: 8443
+      - name: 8778-tcp
+        port: 8778
+        protocol: TCP
+        targetPort: 8778
+      - name: 40001-tcp
+        port: 40001
+        protocol: TCP
+        targetPort: 40001
+      - name: 40011-tcp
+        port: 40011
+        protocol: TCP
+        targetPort: 40011
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    name: jira-run
+  spec:
+    replicas: 0
+    selector:
+      type: jira-run
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          type: jira-run
+        name: jira-run
+      spec:
+        containers:
+          - image: jira
+            name: jira-run
+            env: 
+              - name: JIRA_HOME
+                valueFrom:
+                  configMapKeyRef:
+                    name: jira-environment
+                    key: JIRA_HOME
+              - name: CLUSTERED
+                valueFrom:
+                  configMapKeyRef:
+                    name: jira-environment
+                    key: CLUSTERED
+              - name: NODE_NAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.name
+              - name: JIRA_SHARED_HOME
+                valueFrom:
+                  configMapKeyRef:
+                    name: jira-environment
+                    key: JIRA_SHARED_HOME
+              - name: NODE_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+            ports:
+              - containerPort: 8080
+                protocol: TCP
+              - containerPort: 8443
+                protocol: TCP
+              - containerPort: 8778
+                protocol: TCP
+              - containerPort: 40001
+                protocol: TCP
+            readinessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /status
+                port: 8080
+                scheme: HTTP
+              initialDelaySeconds: 120
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 1
+            livenessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /
+                port: 8080
+                scheme: HTTP
+              initialDelaySeconds: 600
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 1
+            lifecycle:
+              preStop:
+                exec:
+                  command:  ['sh', '-c', '${JIRA_INSTALL_DIR}/bin/jira-stop.sh']
+            resources:
+              limits:
+                cpu: '2'
+                memory: 4Gi
+              requests:
+                cpu: 20m
+                memory: 200Mi
+            volumeMounts:
+              - name: sharedhome
+                mountPath: /data/jira/sharedhome
+              - name: clusterproperties
+                mountPath: /tmp/clusterproperties
+              - name: dbconfigxml
+                mountPath: /tmp/dbconfigxml
+        volumes:
+          - name: sharedhome
+            persistentVolumeClaim:
+              claimName: jira-sharedhome
+          - name: clusterproperties
+            configMap:
+              name: jira-clusterproperties
+          - name: dbconfigxml
+            configMap:
+              name: jira-dbconfigxml
+    triggers:
+      - type: ConfigChange
+      - type: ImageChange
+        imageChangeParams:
+          automatic: true
+          containerNames:
+            - jira-run
+          from:
+            kind: ImageStreamTag
+            name: jira:8.11.0
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: jira
+  spec:
+    port:
+      targetPort: 8080-tcp
+    to:
+      kind: Service
+      name: jira-run
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    name: jira-database
+  spec:
+    replicas: 0
+    selector:
+      type: jira-database
+    strategy:
+      activeDeadlineSeconds: 21600
+      recreateParams:
+        timeoutSeconds: 600
+      resources: {}
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          type: jira-database
+        type: jira-database
+      spec:
+        containers:
+          - env:
+            - name: POSTGRESQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: jira-environment
+                  key: POSTGRESQL_DATABASE
+            - name: POSTGRESQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: jira-environment
+                  key: POSTGRESQL_USER
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jira
+                  key: POSTGRESQL_PASSWORD
+            image: postgresql
+            imagePullPolicy: IfNotPresent
+            livenessProbe:
+              failureThreshold: 3
+              initialDelaySeconds: 30
+              periodSeconds: 10
+              successThreshold: 1
+              tcpSocket:
+                port: 5432
+              timeoutSeconds: 1
+            name: jira-database
+            ports:
+              - containerPort: 5432
+                protocol: TCP
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-i'
+                  - '-c'
+                  - >-
+                    psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d
+                    $POSTGRESQL_DATABASE -c 'SELECT 1'
+              failureThreshold: 3
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 1
+            resources:
+              limits:
+                memory: 512Mi
+            securityContext:
+              capabilities: {}
+              privileged: false
+            volumeMounts:
+              - mountPath: /var/lib/pgsql/data
+                name: data
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: jira-database
+    test: false
+    triggers:
+      - type: ConfigChange
+      - imageChangeParams:
+          automatic: true
+          containerNames:
+            - jira-database
+          from:
+            kind: ImageStreamTag
+            name: postgresql:10
+            namespace: openshift
+        type: ImageChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: jira-database
+  spec:
+    ports:
+      - name: postgresql
+        port: 5432
+        protocol: TCP
+        targetPort: 5432
+    selector:
+      type: jira-database
+    type: ClusterIP
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: jira
+    annotations:
+      template.openshift.io/expose-POSTGRESQL_PASSWORD: '{.data[''POSTGRESQL_PASSWORD'']}'
+      template: jira
+  stringData:
+    POSTGRESQL_PASSWORD: ${DATABASE_PASSWORD}
+  type: Opaque
+parameters:
+  - name: DATABASE_NAME
+    displayName: Database
+    description: The name of the PostgreSQL database to connect to. It will be injected automatically in Jira at startup.
+    value: jiradb
+  - name: DATABASE_USER
+    displayName: Database username
+    description: The username used to access the PostgreSQL database. It will be injected automatically in Jira at startup.
+    value: jira
+  - name: DATABASE_PASSWORD
+    displayName: Database password
+    description: The password for the PostgreSQL database. It will be injected automatically in Jira at startup.
+    generate: expression
+    from: "[a-zA-Z0-9]{12}"
+  - name: DATABASE_SCHEMA
+    displayName: Database schema
+    description: The schema name of the PostgreSQL database. It will be injected automatically in Jira at startup.
+    value: public
